@@ -1,0 +1,11 @@
+# Files that `gcloud run deploy --source .` must NOT upload to Google Cloud.
+# Secrets come from Secret Manager, not from .env.
+.env
+.env.*
+.gcloudignore
+.git
+.gitignore
+.venv/
+__pycache__/
+*.db
+smoke_test.py

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Office Hours{% endblock %} - Office-hours sign-up</title>
+  <title>{% block title %}Office Hours{% endblock %} - {{ site_name }}</title>
   <style>
     :root { --ink: #1f2933; --muted: #52606d; --line: #d9e2ec; --accent: #1f6feb; --accent-dark: #1a5fcc; --bg: #f5f7fa; --card: #ffffff; }
     * { box-sizing: border-box; }
@@ -44,7 +44,26 @@
     table.sheet td.mine button { background: #fff; color: #14532d; border: 1px solid #14532d; font-weight: 400; }
     table.sheet td.taken { background: #f0f3f7; color: var(--muted); }
     table.sheet td.taken button { background: #fff; color: var(--muted); border: 1px solid #9aa5b1; }
-    @media (max-width: 40rem) { nav { flex-wrap: wrap; gap: 0.75rem 1rem; } table.sheet th, table.sheet td { padding: 0.4rem 0.25rem; font-size: 0.85rem; } }
+    .month-nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; max-width: 64rem; width: calc(100% - 2rem); margin: 1.25rem auto 0.75rem; }
+    .month-nav h2 { margin: 0; font-size: 1.25rem; }
+    .month-nav a { font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .month-nav a:hover { text-decoration: underline; }
+    table.calendar th:first-child { width: auto; }
+    table.calendar td { vertical-align: top; text-align: left; padding: 0.4rem; height: 8.5rem; }
+    table.calendar td.out { background: #f0f3f7; }
+    table.calendar td.today { box-shadow: inset 0 0 0 2px var(--accent); }
+    table.calendar .date { font-weight: 600; margin-bottom: 0.15rem; }
+    table.calendar .date span { color: var(--accent); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    table.calendar td form { display: block; }
+    table.calendar .chip { display: block; width: 100%; margin: 0.2rem 0 0; padding: 0.15rem 0.4rem; font-size: 0.8rem; line-height: 1.35; text-align: left; border-radius: 4px; border: 1px solid transparent; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    table.calendar .chip.free { background: #fff; color: var(--accent); border-color: var(--accent); }
+    table.calendar button.chip.free:hover { background: var(--accent); color: #fff; }
+    table.calendar .chip.mine { background: #dcf5e3; color: #14532d; border-color: #14532d; font-weight: 600; }
+    table.calendar button.chip.mine:hover { background: #14532d; color: #fff; }
+    table.calendar .chip.taken { background: #e4e9f0; color: var(--muted); }
+    table.calendar .chip.past { opacity: 0.45; }
+    table.calendar span.chip.free { color: var(--muted); border-color: var(--line); }
+    @media (max-width: 40rem) { nav { flex-wrap: wrap; gap: 0.75rem 1rem; } table.sheet th, table.sheet td { padding: 0.4rem 0.25rem; font-size: 0.85rem; } table.calendar td { height: auto; padding: 0.25rem; } table.calendar .chip { font-size: 0.7rem; padding: 0.1rem 0.2rem; } }
   </style>
 </head>
 <body>

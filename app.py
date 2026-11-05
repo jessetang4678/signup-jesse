@@ -1,6 +1,12 @@
-import sqlite3
+import calendar
+import os
+from datetime import date, datetime, time, timedelta
 from functools import wraps
-from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import psycopg
+from dotenv import load_dotenv
+from psycopg.rows import dict_row
 
 from flask import (
     Flask,
@@ -14,20 +20,21 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-BASE_DIR = Path(__file__).resolve().parent
-DATABASE = BASE_DIR / "signup.db"
+load_dotenv()
+DATABASE_URL = os.environ["DATABASE_URL"]
+SITE_NAME = os.environ["SITE_NAME"]
+ADMIN_USERNAME = os.environ["ADMIN_USERNAME"]
 
 app = Flask(__name__)
-# Replace with a fixed random value (e.g. via an environment variable) before deploying.
-app.config["SECRET_KEY"] = "dev-change-me"
+app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
+app.jinja_env.globals["site_name"] = SITE_NAME
 
 
 # --- Database helpers -------------------------------------------------------
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
+        g.db = psycopg.connect(DATABASE_URL, row_factory=dict_row)
     return g.db
 
 
@@ -39,11 +46,23 @@ def close_db(_exc):
 
 
 def init_db():
-    with sqlite3.connect(DATABASE) as db:
+    with psycopg.connect(DATABASE_URL) as db:
+        # Bookings used to be weekly ("every Monday at 2:00"); now they are for a
+        # date. Weekly ones can't be turned into dates, so move the old table aside
+        # (keeping its rows) and let a new one be created below.
+        old = db.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'bookings' AND column_name = 'weekday'
+            """
+        ).fetchone()
+        if old:
+            db.execute("ALTER TABLE bookings RENAME TO bookings_weekly_old")
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL
             )
@@ -52,11 +71,11 @@ def init_db():
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS bookings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                weekday INTEGER NOT NULL,
+                id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                day DATE NOT NULL,
                 start TEXT NOT NULL,
                 user_id INTEGER NOT NULL REFERENCES users(id),
-                UNIQUE (weekday, start)
+                UNIQUE (day, start)
             )
             """
         )
@@ -67,6 +86,8 @@ def init_db():
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 # Half-hour slots from 2:00 pm to 4:00 pm, stored as 24-hour "HH:MM" strings.
 SLOT_TIMES = ["14:00", "14:30", "15:00", "15:30"]
+# The time zone office hours are held in. It decides which slots are in the past.
+TIMEZONE = ZoneInfo(os.environ.get("TIMEZONE", "America/Los_Angeles"))
 
 
 def format_time(hhmm):
@@ -78,32 +99,47 @@ def format_time(hhmm):
 app.jinja_env.filters["ampm"] = format_time
 
 
-def slot_end(hhmm):
-    hour, minute = (int(p) for p in hhmm.split(":"))
-    minute += 30
-    if minute >= 60:
-        hour, minute = hour + 1, minute - 60
-    return f"{hour:02d}:{minute:02d}"
+def format_day(day):
+    """E.g. "Wednesday, December 9"."""
+    return f"{DAYS[day.weekday()]}, {day:%B} {day.day}"
+
+
+def now_local():
+    return datetime.now(TIMEZONE)
+
+
+def slot_is_past(day, start):
+    """True once a slot has started, so it can no longer be booked or cancelled."""
+    hour, minute = (int(p) for p in start.split(":"))
+    return datetime.combine(day, time(hour, minute), TIMEZONE) <= now_local()
 
 
 def parse_slot(form):
-    """Return (weekday, start) from a form, or None if it isn't a real slot."""
+    """Return (day, start) from a form, or None if it isn't a real slot."""
     try:
-        weekday = int(form.get("weekday", ""))
+        day = date.fromisoformat(form.get("day", ""))
     except ValueError:
         return None
     start = form.get("start", "")
-    if not (0 <= weekday < len(DAYS)) or start not in SLOT_TIMES:
+    if day.weekday() >= len(DAYS) or start not in SLOT_TIMES:
         return None
-    return weekday, start
+    return day, start
+
+
+def parse_month(value):
+    """Return the first day of a "YYYY-MM" month, or of this month if it isn't one."""
+    try:
+        first = datetime.strptime(value or "", "%Y-%m").date()
+    except ValueError:
+        first = None
+    if first is None or not 2000 <= first.year <= 2100:
+        first = now_local().date().replace(day=1)
+    return first
 
 
 def is_admin(user):
-    """The first user who registered is the administrator."""
-    if user is None:
-        return False
-    first = get_db().execute("SELECT MIN(id) AS id FROM users").fetchone()
-    return first["id"] == user["id"]
+    """The administrator is the user named by ADMIN_USERNAME in .env."""
+    return user is not None and user["username"] == ADMIN_USERNAME
 
 
 # --- Auth helpers -----------------------------------------------------------
@@ -115,7 +151,7 @@ def load_current_user():
         g.user = None
     else:
         g.user = get_db().execute(
-            "SELECT id, username FROM users WHERE id = ?", (user_id,)
+            "SELECT id, username FROM users WHERE id = %s", (user_id,)
         ).fetchone()
         if g.user is None:
             session.clear()
@@ -154,11 +190,12 @@ def register():
             db = get_db()
             try:
                 db.execute(
-                    "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                    "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
                     (username, generate_password_hash(password)),
                 )
                 db.commit()
-            except sqlite3.IntegrityError:
+            except psycopg.errors.UniqueViolation:
+                db.rollback()
                 flash(f"Username '{username}' is already taken.")
             else:
                 flash("Account created. You can log in now.")
@@ -174,7 +211,7 @@ def login():
         password = request.form.get("password", "")
 
         user = get_db().execute(
-            "SELECT * FROM users WHERE username = ?", (username,)
+            "SELECT * FROM users WHERE username = %s", (username,)
         ).fetchone()
 
         if user is None or not check_password_hash(user["password_hash"], password):
@@ -199,37 +236,63 @@ def logout():
 @app.route("/sheet")
 @login_required
 def sheet():
+    first = parse_month(request.args.get("month"))
+    # Whole weeks, Monday to Sunday, covering the month.
+    weeks = calendar.Calendar().monthdatescalendar(first.year, first.month)
+
     rows = get_db().execute(
         """
-        SELECT b.weekday, b.start, b.user_id, u.username
+        SELECT b.day, b.start, b.user_id, u.username
         FROM bookings b JOIN users u ON u.id = b.user_id
-        """
+        WHERE b.day BETWEEN %s AND %s
+        """,
+        (weeks[0][0], weeks[-1][-1]),
     ).fetchall()
-    bookings = {(r["weekday"], r["start"]): r for r in rows}
+    bookings = {(r["day"], r["start"]): r for r in rows}
+    today = now_local().date()
 
-    # One cell per (time, day); each cell says whether it is free, yours, or taken.
+    # One row per week, one cell per weekday (None for days outside the month),
+    # and in each cell the day's slots: free, yours, or taken.
     grid = []
-    for start in SLOT_TIMES:
+    for week in weeks:
         cells = []
-        for weekday in range(len(DAYS)):
-            booking = bookings.get((weekday, start))
-            if booking is None:
-                status = "free"
-            elif booking["user_id"] == g.user["id"]:
-                status = "mine"
-            else:
-                status = "taken"
-            cells.append(
-                {
-                    "weekday": weekday,
-                    "start": start,
-                    "status": status,
-                    "username": booking["username"] if booking else None,
-                }
-            )
-        grid.append({"start": start, "end": slot_end(start), "cells": cells})
+        for day in week[: len(DAYS)]:
+            if day.month != first.month:
+                cells.append(None)
+                continue
+            slots = []
+            for start in SLOT_TIMES:
+                booking = bookings.get((day, start))
+                if booking is None:
+                    status = "free"
+                elif booking["user_id"] == g.user["id"]:
+                    status = "mine"
+                else:
+                    status = "taken"
+                slots.append(
+                    {
+                        "start": start,
+                        "status": status,
+                        "past": slot_is_past(day, start),
+                        "username": booking["username"] if booking else None,
+                    }
+                )
+            cells.append({"date": day, "today": day == today, "slots": slots})
+        if any(cells):
+            grid.append(cells)
 
-    return render_template("sheet.html", days=DAYS, grid=grid)
+    return render_template(
+        "sheet.html",
+        days=DAYS,
+        grid=grid,
+        month=first,
+        prev_month=(first - timedelta(days=1)).replace(day=1),
+        next_month=(first + timedelta(days=31)).replace(day=1),
+    )
+
+
+def back_to_month(day):
+    return redirect(url_for("sheet", month=day.strftime("%Y-%m")))
 
 
 @app.route("/book", methods=["POST"])
@@ -239,20 +302,24 @@ def book():
     if slot is None:
         flash("That is not a valid slot.")
         return redirect(url_for("sheet"))
-    weekday, start = slot
+    day, start = slot
+    if slot_is_past(day, start):
+        flash("That slot is in the past.")
+        return back_to_month(day)
 
     db = get_db()
     try:
         db.execute(
-            "INSERT INTO bookings (weekday, start, user_id) VALUES (?, ?, ?)",
-            (weekday, start, g.user["id"]),
+            "INSERT INTO bookings (day, start, user_id) VALUES (%s, %s, %s)",
+            (day, start, g.user["id"]),
         )
         db.commit()
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
+        db.rollback()
         flash("Sorry, that slot has already been taken.")
     else:
-        flash(f"Booked {DAYS[weekday]} at {format_time(start)}.")
-    return redirect(url_for("sheet"))
+        flash(f"Booked {format_day(day)} at {format_time(start)}.")
+    return back_to_month(day)
 
 
 @app.route("/cancel", methods=["POST"])
@@ -262,20 +329,23 @@ def cancel():
     if slot is None:
         flash("That is not a valid slot.")
         return redirect(url_for("sheet"))
-    weekday, start = slot
+    day, start = slot
+    if slot_is_past(day, start):
+        flash("That slot is in the past.")
+        return back_to_month(day)
 
     db = get_db()
     # Only the person who booked a slot may cancel it.
     deleted = db.execute(
-        "DELETE FROM bookings WHERE weekday = ? AND start = ? AND user_id = ?",
-        (weekday, start, g.user["id"]),
+        "DELETE FROM bookings WHERE day = %s AND start = %s AND user_id = %s",
+        (day, start, g.user["id"]),
     ).rowcount
     db.commit()
     if deleted:
-        flash(f"Cancelled {DAYS[weekday]} at {format_time(start)}.")
+        flash(f"Cancelled {format_day(day)} at {format_time(start)}.")
     else:
         flash("You have no booking in that slot.")
-    return redirect(url_for("sheet"))
+    return back_to_month(day)
 
 
 init_db()

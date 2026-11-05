@@ -3,41 +3,55 @@
 {% block content %}
   <h1>Sign-up sheet</h1>
   <p>Office hours run Monday to Friday, 2:00 to 4:00 pm, in half-hour slots.
+    Click a free time to book it, or one of yours to cancel it.
     {% if g.is_admin %}You are the administrator and can see who booked each slot.{% endif %}
   </p>
 
-  <table class="sheet">
+  <div class="month-nav">
+    <a href="{{ url_for('sheet', month=prev_month.strftime('%Y-%m')) }}">&larr; {{ prev_month.strftime('%B') }}</a>
+    <h2>{{ month.strftime('%B %Y') }}</h2>
+    <a href="{{ url_for('sheet', month=next_month.strftime('%Y-%m')) }}">{{ next_month.strftime('%B') }} &rarr;</a>
+  </div>
+
+  <table class="sheet calendar">
     <thead>
       <tr>
-        <th></th>
         {% for day in days %}<th>{{ day }}</th>{% endfor %}
       </tr>
     </thead>
     <tbody>
-      {% for row in grid %}
+      {% for week in grid %}
         <tr>
-          <th>{{ row.start | ampm }} &ndash; {{ row.end | ampm }}</th>
-          {% for cell in row.cells %}
-            <td class="{{ cell.status }}">
-              {% if cell.status == 'free' %}
-                <form method="post" action="{{ url_for('book') }}">
-                  <input type="hidden" name="weekday" value="{{ cell.weekday }}">
-                  <input type="hidden" name="start" value="{{ cell.start }}">
-                  <button type="submit">Book</button>
-                </form>
-              {% elif cell.status == 'mine' %}
-                <span>Yours</span>
-                <form method="post" action="{{ url_for('cancel') }}">
-                  <input type="hidden" name="weekday" value="{{ cell.weekday }}">
-                  <input type="hidden" name="start" value="{{ cell.start }}">
-                  <button type="submit">Cancel</button>
-                </form>
-              {% elif g.is_admin %}
-                <span>Taken by <strong>{{ cell.username }}</strong></span>
-              {% else %}
-                <span>Taken</span>
-              {% endif %}
-            </td>
+          {% for cell in week %}
+            {% if cell is none %}
+              <td class="out"></td>
+            {% else %}
+              <td class="{{ 'today' if cell.today }}">
+                <div class="date">{{ cell.date.day }}{% if cell.today %} <span>Today</span>{% endif %}</div>
+                {% for slot in cell.slots %}
+                  {% if slot.status == 'free' and not slot.past %}
+                    <form method="post" action="{{ url_for('book') }}">
+                      <input type="hidden" name="day" value="{{ cell.date.isoformat() }}">
+                      <input type="hidden" name="start" value="{{ slot.start }}">
+                      <button type="submit" class="chip free" title="Book this slot">{{ slot.start | ampm }}</button>
+                    </form>
+                  {% elif slot.status == 'mine' and not slot.past %}
+                    <form method="post" action="{{ url_for('cancel') }}">
+                      <input type="hidden" name="day" value="{{ cell.date.isoformat() }}">
+                      <input type="hidden" name="start" value="{{ slot.start }}">
+                      <button type="submit" class="chip mine" title="Cancel this booking">{{ slot.start | ampm }} &middot; Yours</button>
+                    </form>
+                  {% else %}
+                    <span class="chip {{ slot.status }}{{ ' past' if slot.past }}">
+                      {{- slot.start | ampm -}}
+                      {% if slot.status == 'mine' %} &middot; Yours
+                      {%- elif slot.status == 'taken' and g.is_admin %} &middot; <strong>{{ slot.username }}</strong>
+                      {%- elif slot.status == 'taken' %} &middot; Taken{% endif -%}
+                    </span>
+                  {% endif %}
+                {% endfor %}
+              </td>
+            {% endif %}
           {% endfor %}
         </tr>
       {% endfor %}
