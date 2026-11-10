@@ -8,12 +8,13 @@ from dotenv import load_dotenv
 os.chdir(Path(__file__).resolve().parent)
 sys.path.insert(0, os.getcwd())
 
-# Point the app at the test database so the smoke test doesn't touch real data.
+# Run locally, the app uses TEST_DATABASE_URL, so the smoke test never touches
+# the production database (DATABASE_URL).
 load_dotenv()
 TEST_DATABASE_URL = os.environ["TEST_DATABASE_URL"]
 if TEST_DATABASE_URL == os.environ.get("DATABASE_URL"):
     sys.exit("TEST_DATABASE_URL must differ from DATABASE_URL: the smoke test wipes its tables.")
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+os.environ.pop("K_SERVICE", None)  # make sure the app picks the local database
 # Fixed values so the test doesn't depend on what .env says.
 os.environ["SITE_NAME"] = "Test Sign-up Site"
 os.environ["ADMIN_USERNAME"] = "alice"
