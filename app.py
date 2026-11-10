@@ -25,7 +25,7 @@ load_dotenv()
 # whose URL Cloud Run reads from Secret Manager. Anywhere else (your laptop), use
 # the development database from .env.
 ON_CLOUD_RUN = "K_SERVICE" in os.environ
-DATABASE_URL = os.environ["DATABASE_URL" if ON_CLOUD_RUN else "TEST_DATABASE_URL"]
+DATABASE_URL = os.environ["DATABASE_URL" if ON_CLOUD_RUN else "DEV_DATABASE_URL"]
 SITE_NAME = os.environ["SITE_NAME"]
 ADMIN_USERNAME = os.environ["ADMIN_USERNAME"]
 
