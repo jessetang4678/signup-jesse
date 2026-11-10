@@ -1,6 +1,6 @@
 # signup
 
-The office-hours sign-up sheet from *Building Software Systems with AI*, as it is at the end of chapter 11, *Adding Accounts and a Database*: accounts, the sheet, a Postgres database on Neon (set `DATABASE_URL` and `TEST_DATABASE_URL` in `.env`), and the Google Cloud setup script `gcp_setup.sh`. This is the starting point for chapter 12, *Deployment*.
+The office-hours sign-up sheet from *Building Software Systems with AI*, as it is at the end of chapter 11, *Adding Accounts and a Database*: accounts, the sheet, a Postgres database on Neon (set `DATABASE_URL` (production, used on Google Cloud), `DEV_DATABASE_URL` (used when running locally) and `TEST_DATABASE_URL` (wiped and used by `smoke_test.py`) in `.env`), and the Google Cloud setup script `gcp_setup.sh`. This is the starting point for chapter 12, *Deployment*.
 
 To start chapter 12 from here: click *Use this template* on GitHub, name your repository `signup`, clone it into your home folder, then in `~/signup`:
 

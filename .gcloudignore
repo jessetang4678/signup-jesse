@@ -9,3 +9,6 @@
 __pycache__/
 *.db
 smoke_test.py
+test/
+pytest.ini
+.pytest_cache/
